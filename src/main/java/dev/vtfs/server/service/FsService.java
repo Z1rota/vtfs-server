@@ -8,6 +8,7 @@ import dev.vtfs.server.entity.FsNodeType;
 import dev.vtfs.server.exception.FsException;
 import dev.vtfs.server.repository.DirectoryEntryRepository;
 import dev.vtfs.server.repository.InodeRepository;
+import dev.vtfs.server.storage.RedisFileStorage;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,6 +24,7 @@ import java.util.Optional;
 public class FsService {
     private final InodeRepository inodeRepository;
     private final DirectoryEntryRepository entryRepository;
+    private final RedisFileStorage redisFileStorage;
     private static final int MAX_READ_SIZE = 16 * 1024;
     private static final int MAX_WRITE_SIZE = 16 * 1024;
     private static final int MAX_FILE_SIZE = 1024 * 1024;
@@ -116,9 +118,9 @@ public class FsService {
         if (offset >= data.length) {
             return new byte[0];
         }
-        int start = (int) offset;
-        int end = start + Math.min(length, data.length - start);
-        return Arrays.copyOfRange(data,start,end);
+
+        int toRead = (int) Math.min(length, inode.getSize()-offset);
+        return redisFileStorage.read(inodeId,offset,toRead);
     }
 
     private InodeInfo createNode(Long parentId, String name, FsNodeType nodeType, int permissions) {
@@ -157,7 +159,7 @@ public class FsService {
         }
         byte[] current = inode.getData();
         long position = append ? current.length : offset;
-        if (position >= MAX_FILE_SIZE || position + bytes.length > MAX_WRITE_SIZE) {
+        if (position > MAX_FILE_SIZE || bytes.length > MAX_FILE_SIZE - position) {
             throw new FsException(27);
         }
         int start = (int) position;
@@ -170,7 +172,7 @@ public class FsService {
 
     @Transactional
     public void truncate(Long inodeId, long newSize) {
-        if (newSize < 0 || newSize > MAX_WRITE_SIZE) {
+        if (newSize < 0 || newSize > MAX_FILE_SIZE) {
             throw new FsException(22);
         }
         FsInode inode = inodeRepository.findByIdForUpdate(inodeId).orElseThrow(() -> new FsException(2));

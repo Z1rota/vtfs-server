@@ -37,7 +37,7 @@ public class RedisFileStorage {
         }
         byte[] redisKey = key.getBytes(StandardCharsets.UTF_8);
         return redis.execute((RedisCallback<byte[]>) connection -> connection.stringCommands()
-                .getRange(redisKey, offset, offset+length+1));
+                .getRange(redisKey, offset, offset+length-1));
 
     }
 
