@@ -5,6 +5,7 @@ import dev.vtfs.server.protocol.FsBinaryResponse;
 import dev.vtfs.server.service.FsService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataAccessException;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 
@@ -83,12 +84,6 @@ public class FsController {
         return execute(token, () -> FsBinaryResponse.inode(fsService.link(inode,parent,name)));
     }
 
-    @GetMapping(value = "/rename",produces = MediaType.APPLICATION_OCTET_STREAM_VALUE)
-    public byte[] rename(@RequestParam String token, @RequestParam Long oldParent, @RequestParam String oldName,
-                         @RequestParam Long newParent, @RequestParam String newName) {
-        return execute(token, () -> fsService.rename(oldParent,oldName,newParent,newName));
-    }
-
     @GetMapping(value = "/root", produces = MediaType.APPLICATION_OCTET_STREAM_VALUE)
     public byte[] root(@RequestParam String token) {
         return execute(token, () -> FsBinaryResponse.inode(fsService.root()));
@@ -103,6 +98,9 @@ public class FsController {
             return operation.get();
         } catch (FsException e) {
             return FsBinaryResponse.status(e.getErrno());
+        } catch (DataAccessException e) {
+            return FsBinaryResponse.status(5);
+
         }
     }
 
