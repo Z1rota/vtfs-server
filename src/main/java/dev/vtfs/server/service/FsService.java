@@ -12,6 +12,8 @@ import dev.vtfs.server.storage.RedisFileStorage;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
@@ -72,6 +74,7 @@ public class FsService {
 
         if (target.getLinkCount() == 0) {
             inodeRepository.delete(target);
+            deleteContentAfterCommit(target.getId());
         }
         parent.directoryContentsChanged();
     }
@@ -135,6 +138,9 @@ public class FsService {
             throw new FsException(17);
         }
         FsInode inode = inodeRepository.save(new FsInode(nodeType,permissions,false));
+        if (nodeType == FsNodeType.FILE) {
+            redisFileStorage.create(inode.getId());
+        }
 
         entryRepository.save(new DirectoryEntry(parent,inode,name));
 
@@ -157,16 +163,13 @@ public class FsService {
         if (bytes.length == 0) {
             return 0;
         }
-        byte[] current = inode.getData();
-        long position = append ? current.length : offset;
+        long position = append ? inode.getSize() : offset;
         if (position > MAX_FILE_SIZE || bytes.length > MAX_FILE_SIZE - position) {
             throw new FsException(27);
         }
-        int start = (int) position;
-        int newSize = Math.max(current.length, start + bytes.length);
-        byte[] result = Arrays.copyOf(current,newSize);
-        System.arraycopy(bytes,0,result,start,bytes.length);
-        inode.setData(result);
+        redisFileStorage.write(inodeId,position,bytes);
+        long newSize = Math.max(inode.getSize(),position + bytes.length);
+        inode.updateSize(newSize);
         return bytes.length;
     }
 
@@ -182,8 +185,8 @@ public class FsService {
         if (inode.getSize() == newSize) {
             return;
         }
-        byte[] data = Arrays.copyOf(inode.getData(),(int) newSize);
-        inode.setData(data);
+        redisFileStorage.truncate(inodeId,newSize);
+        inode.updateSize(newSize);
     }
 
     @Transactional
@@ -313,5 +316,19 @@ public class FsService {
         if (inode.type() != FsNodeType.DIRECTORY) {
             throw new FsException(20);
         }
+    }
+
+    private void deleteContentAfterCommit(Long inodeId) {
+        TransactionSynchronizationManager.registerSynchronization(
+                new TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        try {
+                            redisFileStorage.delete(inodeId);
+                        } catch (Exception e) {
+                        }
+                    }
+                }
+        );
     }
 }

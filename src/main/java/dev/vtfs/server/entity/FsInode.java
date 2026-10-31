@@ -95,6 +95,18 @@ public class FsInode {
         this.changedAt = this.modifiedAt;
     }
 
+    public void updateSize(long newSize) {
+        if (type != FsNodeType.FILE) {
+            throw new IllegalStateException("Not a regular file");
+        }
+
+        this.size = newSize;
+
+        Instant now = Instant.now();
+        this.modifiedAt = now;
+        this.changedAt = now;
+    }
+
 
 
 }
