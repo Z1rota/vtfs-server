@@ -117,13 +117,17 @@ public class FsService {
         if (inode.getType() != FsNodeType.FILE) {
             throw new FsException(21);
         }
-        byte[] data = inode.getData();
-        if (offset >= data.length) {
+        if (offset >= inode.getSize() || length == 0) {
             return new byte[0];
         }
 
         int toRead = (int) Math.min(length, inode.getSize()-offset);
-        return redisFileStorage.read(inodeId,offset,toRead);
+        byte[] res = redisFileStorage.read(inodeId,offset,toRead);
+        if (res == null || res.length != toRead) {
+            throw new FsException(5);
+        }
+
+        return res;
     }
 
     private InodeInfo createNode(Long parentId, String name, FsNodeType nodeType, int permissions) {
@@ -215,71 +219,6 @@ public class FsService {
         return new InodeInfo(target.getId(),target.getType(), target.getPermissions(), target.getSize(),target.getLinkCount());
     }
 
-    @Transactional
-    public void rename(Long oldParentId, String oldName, Long newParentId, String newName) {
-        validateName(oldName);
-        validateName(newName);
-        lockNamespace();
-        FsInode oldParent = inodeRepository.findByIdForUpdate(oldParentId).orElseThrow(() -> new FsException(2));
-        FsInode newParent = oldParentId.equals(newParentId) ? oldParent
-                : inodeRepository.findByIdForUpdate(newParentId).orElseThrow(() -> new FsException(2));
-        if (oldParent.getType() != FsNodeType.DIRECTORY || newParent.getType() != FsNodeType.DIRECTORY) {
-            throw new FsException(20);
-        }
-        DirectoryEntry sourceEntry = entryRepository.findEntry(oldParentId,oldName).orElseThrow(() -> new FsException(2));
-
-        if (oldParentId.equals(newParentId) && oldName.equals(newName)) {
-            return;
-        }
-
-        FsInode source = inodeRepository.findByIdForUpdate(sourceEntry.getTarget().getId()).orElseThrow(() -> new FsException(2));
-
-        if (source.getType() == FsNodeType.DIRECTORY && isSelfOrDescendant(source.getId(),newParentId)) {
-            throw new FsException(22);
-        }
-
-        Optional<DirectoryEntry> existing = entryRepository.findEntry(newParentId,newName);
-        if (existing.isPresent()) {
-            DirectoryEntry destinationEntry = existing.get();
-
-            FsInode destination = inodeRepository.findByIdForUpdate(
-                    destinationEntry.getTarget().getId()).orElseThrow(() -> new FsException(2));
-            if (source.getType() == FsNodeType.FILE && destination.getType() == FsNodeType.DIRECTORY) {
-                throw new FsException(21);
-            }
-            if (source.getType() == FsNodeType.DIRECTORY && destination.getType() == FsNodeType.FILE) {
-                throw new FsException(20);
-            }
-            if (destination.getType() == FsNodeType.DIRECTORY && entryRepository.countChildren(destination.getId()) > 0) {
-                throw new FsException(39);
-            }
-            entryRepository.delete(destinationEntry);
-            entryRepository.flush();
-
-            if (destination.getType() == FsNodeType.FILE) {
-                destination.decrementLinks();
-                if (destination.getLinkCount() == 0) {
-                    inodeRepository.delete(destination);
-                }
-            } else {
-                inodeRepository.delete(destination);
-                newParent.decrementLinks();
-            }
-        }
-        sourceEntry.moveTo(newParent,newName);
-        if (source.getType() == FsNodeType.DIRECTORY && !oldParent.equals(newParent)) {
-            oldParent.decrementLinks();
-            newParent.incrementLinks();
-        }
-        source.metadataChanged();
-        oldParent.directoryContentsChanged();
-
-        if (!oldParentId.equals(newParentId)) {
-            newParent.directoryContentsChanged();
-        }
-
-    }
-
     private boolean isSelfOrDescendant(Long directoryId, Long parentId) {
         Long current = parentId;
 
@@ -326,6 +265,7 @@ public class FsService {
                         try {
                             redisFileStorage.delete(inodeId);
                         } catch (Exception e) {
+                            System.err.println("Failed to delete Redis content for inode " + inodeId);
                         }
                     }
                 }

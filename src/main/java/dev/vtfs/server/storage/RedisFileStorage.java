@@ -1,5 +1,6 @@
 package dev.vtfs.server.storage;
 
+import dev.vtfs.server.exception.FsException;
 import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Component;
@@ -30,7 +31,7 @@ public class RedisFileStorage {
         String key = key(inodeId);
 
         if (!Boolean.TRUE.equals(redis.hasKey(key))) {
-            throw new IllegalArgumentException("invalid key");
+            throw new FsException(5);
         }
         if (length == 0) {
             return new byte[0];
@@ -47,7 +48,7 @@ public class RedisFileStorage {
         }
         String key = key(inodeId);
         if (!Boolean.TRUE.equals(redis.hasKey(key))) {
-            throw new IllegalArgumentException("invalid key");
+            throw new FsException(5);
         }
         if (data.length == 0) {
             return;
@@ -62,7 +63,7 @@ public class RedisFileStorage {
         String key = key(inodeId);
 
         if (!Boolean.TRUE.equals(redis.hasKey(key))) {
-            throw new IllegalStateException("File content not found in Redis");
+            throw new FsException(5);
         }
 
         byte[] data = redis.opsForValue().get(key);
