@@ -2,11 +2,11 @@ package dev.vtfs.server.service;
 
 import dev.vtfs.server.dto.DirectoryItem;
 import dev.vtfs.server.dto.InodeInfo;
-import dev.vtfs.server.entity.DirectoryEntry;
-import dev.vtfs.server.entity.FsInode;
-import dev.vtfs.server.entity.FsNodeType;
+import dev.vtfs.server.entity.*;
 import dev.vtfs.server.exception.FsException;
 import dev.vtfs.server.repository.DirectoryEntryRepository;
+import dev.vtfs.server.repository.FsOpenHandleRepository;
+import dev.vtfs.server.repository.FsSessionRepository;
 import dev.vtfs.server.repository.InodeRepository;
 import dev.vtfs.server.storage.RedisFileStorage;
 import lombok.RequiredArgsConstructor;
@@ -16,9 +16,8 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
+import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
 
 @Service
 @RequiredArgsConstructor
@@ -27,6 +26,8 @@ public class FsService {
     private final InodeRepository inodeRepository;
     private final DirectoryEntryRepository entryRepository;
     private final RedisFileStorage redisFileStorage;
+    private final FsSessionRepository sessionRepository;
+    private final FsOpenHandleRepository fsOpenHandleRepository;
     private static final int MAX_READ_SIZE = 16 * 1024;
     private static final int MAX_WRITE_SIZE = 16 * 1024;
     private static final int MAX_FILE_SIZE = 1024 * 1024;
@@ -73,8 +74,9 @@ public class FsService {
         target.decrementLinks();
 
         if (target.getLinkCount() == 0) {
-            inodeRepository.delete(target);
-            deleteContentAfterCommit(target.getId());
+            target.decrementLinks();
+            deleteOrphanedInode(target);
+            parent.directoryContentsChanged();
         }
         parent.directoryContentsChanged();
     }
@@ -248,12 +250,83 @@ public class FsService {
         }
     }
 
+    @Transactional
+    public Long startSession() {
+        FsSession session = sessionRepository.save(new FsSession(Instant.now()));
+        return session.getId();
+    }
+    @Transactional
+    public void heartbeat(Long sessionId) {
+        FsSession session = sessionRepository.findByIdForUpdate(sessionId).orElseThrow(() -> new FsException(2));
+        session.heartbeat();
+    }
+
+    @Transactional
+    public Long open(Long sessionId, Long inodeId) {
+        FsSession session = sessionRepository.findByIdForUpdate(sessionId).orElseThrow(() -> new FsException(2));
+
+        FsInode inode = inodeRepository.findByIdForUpdate(inodeId).orElseThrow(() -> new FsException(2));
+
+        if (inode.getType() != FsNodeType.FILE) {
+            throw new FsException(21);
+        }
+        FsOpenHandle handle = fsOpenHandleRepository.save(new FsOpenHandle(sessionId, inodeId));
+        session.heartbeat();
+        return handle.getId();
+    }
+
+    @Transactional
+    public void closeHandle(Long sessionId, Long handleId) {
+        FsSession session = sessionRepository.findByIdForUpdate(sessionId).orElseThrow(() -> new FsException(2));
+
+        FsOpenHandle handle = fsOpenHandleRepository.findByIdAndSessionId(handleId, sessionId)
+                .orElseThrow(() -> new FsException(9));
+
+        FsInode inode = inodeRepository.findByIdForUpdate(handle.getInodeId()).orElseThrow(() -> new FsException(2));
+
+        fsOpenHandleRepository.delete(handle);
+        fsOpenHandleRepository.flush();
+
+        deleteOrphanedInode(inode);
+        session.heartbeat();
+    }
+
+    @Transactional
+    public void endSession(Long sessionId) {
+        FsSession session = sessionRepository.findByIdForUpdate(sessionId).orElse(null);
+
+        if (session == null) {
+            return;
+        }
+        finishSession(session);
+    }
+
+    @Transactional
+    public void expireSession(Long sessionId, Instant cutoff) {
+        FsSession session = sessionRepository.findByIdForUpdate(sessionId).orElse(null);
+
+        if (session == null || !session.getLastSeenAt().isBefore(cutoff)) {
+            return;
+        }
+
+        finishSession(session);
+    }
 
     private void checkDirectory(Long inodeId) {
         InodeInfo inode = stat(inodeId);
 
         if (inode.type() != FsNodeType.DIRECTORY) {
             throw new FsException(20);
+        }
+    }
+
+    private void deleteOrphanedInode(FsInode inode) {
+        if (inode.getLinkCount() == 0 && fsOpenHandleRepository.countByInodeId(inode.getId()) == 0) {
+
+            Long inodeId = inode.getId();
+
+            inodeRepository.delete(inode);
+            deleteContentAfterCommit(inodeId);
         }
     }
 
@@ -270,5 +343,21 @@ public class FsService {
                     }
                 }
         );
+    }
+
+    private void finishSession(FsSession session) {
+        List<FsOpenHandle> handles = fsOpenHandleRepository.findBySessionId(session.getId());
+
+        for (FsOpenHandle handle : handles) {
+            FsInode inode = inodeRepository.findByIdForUpdate(handle.getInodeId()).orElse(null);
+
+            fsOpenHandleRepository.delete(handle);
+            fsOpenHandleRepository.flush();
+
+            if (inode != null) {
+                deleteOrphanedInode(inode);
+            }
+        }
+        sessionRepository.delete(session);
     }
 }

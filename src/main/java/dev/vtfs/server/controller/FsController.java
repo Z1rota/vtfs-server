@@ -89,6 +89,31 @@ public class FsController {
         return execute(token, () -> FsBinaryResponse.inode(fsService.root()));
     }
 
+    @GetMapping(value = "/session/start", produces = MediaType.APPLICATION_OCTET_STREAM_VALUE)
+    public byte[] startSession(@RequestParam String token) {
+        return execute(token, () -> FsBinaryResponse.identifier(fsService.startSession()));
+    }
+
+    @GetMapping(value = "/session/heartbeat", produces = MediaType.APPLICATION_OCTET_STREAM_VALUE)
+    public byte[] heartbeat(@RequestParam String token, @RequestParam Long session) {
+        return execute(token, () -> fsService.heartbeat(session));
+    }
+
+    @GetMapping(value = "/session/end", produces = MediaType.APPLICATION_OCTET_STREAM_VALUE)
+    public byte[] endSession(@RequestParam String token, @RequestParam Long session) {
+        return execute(token, () -> fsService.endSession(session));
+    }
+
+    @GetMapping(value = "/open", produces = MediaType.APPLICATION_OCTET_STREAM_VALUE)
+    public byte[] open(@RequestParam String token, @RequestParam Long session, @RequestParam Long inode) {
+        return execute(token, () -> FsBinaryResponse.identifier(fsService.open(session, inode)));
+    }
+
+    @GetMapping(value = "/close", produces = MediaType.APPLICATION_OCTET_STREAM_VALUE)
+    public byte[] close(@RequestParam String token, @RequestParam Long session, @RequestParam Long handle) {
+        return execute(token, () -> fsService.closeHandle(session, handle));
+    }
+
 
     private byte[] execute(String token, Supplier<byte[]> operation) {
         if (!expectedToken.equals(token)) {

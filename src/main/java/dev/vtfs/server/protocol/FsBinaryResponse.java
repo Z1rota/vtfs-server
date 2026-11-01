@@ -66,14 +66,19 @@ public class FsBinaryResponse {
     }
 
 
-
-
-
     public static byte[] status(int errno) {
         return ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).putLong(errno).array();
     }
 
     private static byte nodeType(FsNodeType type) {
         return (byte) (type == FsNodeType.DIRECTORY ? 2 : 1);
+    }
+
+    public static byte[] identifier(Long id) {
+        return ByteBuffer.allocate(16)
+                .order(ByteOrder.LITTLE_ENDIAN)
+                .putLong(0)
+                .putLong(id)
+                .array();
     }
 }
