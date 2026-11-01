@@ -71,13 +71,9 @@ public class FsService {
         }
         entryRepository.delete(entry);
         entryRepository.flush();
-        target.decrementLinks();
 
-        if (target.getLinkCount() == 0) {
-            target.decrementLinks();
-            deleteOrphanedInode(target);
-            parent.directoryContentsChanged();
-        }
+        target.decrementLinks();
+        deleteOrphanedInode(target);
         parent.directoryContentsChanged();
     }
 

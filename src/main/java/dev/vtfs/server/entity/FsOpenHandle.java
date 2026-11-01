@@ -12,14 +12,14 @@ public class FsOpenHandle {
     private Long id;
 
     @Column(name="session_id",nullable = false)
-    private Long SessionId;
+    private Long sessionId;
 
     @Column(name="inode_id",nullable = false)
     private Long inodeId;
 
     protected FsOpenHandle() {}
-    public FsOpenHandle(Long SessionId, Long inodeId) {
-        this.SessionId = SessionId;
+    public FsOpenHandle(Long sessionId, Long inodeId) {
+        this.sessionId = sessionId;
         this.inodeId = inodeId;
     }
 }
